@@ -1,6 +1,6 @@
 # Android Virtual World
 
-Android Virtual World (AVW) 是基于 Android Emulator Fork 的增强发行版，让用户能够修改虚拟 Android 设备的系统信息、模拟硬件输入，并通过脚本控制设备行为。
+Android Virtual World (AVW) 是基于原版 QEMU、面向 Android 的虚拟化发行版，让用户能够修改虚拟 Android 设备的系统信息、模拟硬件输入，并通过脚本控制设备行为。
 
 **Planning.**
 
@@ -10,9 +10,23 @@ Android Virtual World (AVW) 是基于 Android Emulator Fork 的增强发行版�
 
 ## 技术路线
 
-Fork Android Emulator，扩展虚拟硬件、媒体输入和运行时控制接口。Root 预计使用 Magisk，系统扩展通过 Magisk 模块实现，有需要时考虑采用内核模块。
+以原版 QEMU 为基础，优先兼容 Android Studio 的 AVD 镜像，参考 Android Emulator 的镜像适配和 Cuttlefish 的硬件仿真实现。Cuttlefish 镜像兼容作为附加目标。
 
-Emulator 侧负责虚拟硬件和输入数据，Magisk 模块负责 Android 内的系统修改，两者共同提供设备控制能力。
+重点适配 AVD 镜像所需的启动配置、虚拟硬件、宿主通信和图形接口。Root 预计使用 Magisk，系统扩展通过 Magisk 模块实现，有需要时考虑采用内核模块。
+
+## 模块规划
+
+```text
+qemu/           虚拟机运行、CPU、内存、加速、启动与快照
+hardware/       共享虚拟硬件模型、设备状态与控制接口
+interaction/    点击、滑动、手势、键鼠等输入交互
+sysctrl/        系统信息与配置修改的 Magisk 模块
+virtualenv/     设备配置、环境状态、时间线、场景与 DSL
+gui/            桌面界面
+cli/            命令行
+```
+
+`hardware/` 是 `qemu/`、`interaction/` 和 `virtualenv/` 的共同依赖，三个模块操作同一组虚拟硬件实例。`qemu/` 负责让设备参与虚拟机运行，`interaction/` 提交用户操作，`virtualenv/` 编排设备和环境变化。
 
 ## 功能规划
 
@@ -26,7 +40,7 @@ Emulator 侧负责虚拟硬件和输入数据，Magisk 模块负责 Android 内�
 
 ### Root 与系统定制
 
-通过 Magisk 模块接收模拟器侧的控制指令，修改 Android 系统信息和配置。
+通过 `sysctrl/` 中的 Magisk 模块接收控制指令，修改 Android 系统信息和配置。
 
 - **Root 启用**：为包含 `user` 镜像在内的 Android 系统开启或强制开启 Root。
 - **系统信息**：品牌、制造商、型号、构建指纹、版本信息、Android ID、序列号及网络和电话标识。
@@ -57,15 +71,21 @@ Emulator 侧负责虚拟硬件和输入数据，Magisk 模块负责 Android 内�
 
 后续扩展方向包括多摄组合、深度相机、卫星定位（GNSS）原始测量、心率和超宽带（UWB）测距。
 
+### 显示与交互
+
+对 QEMU 的显示逻辑进行优化，虚拟显示器和图形渲染放在 `hardware/display/` 中。设备在后台运行时保留显示状态，用户可以随时打开、关闭或使用程序转发、录制桌面显示窗口，无需重启虚拟机。
+
+`interaction/` 将点击、滑动、长按、多点触控和键鼠操作直接提交给虚拟输入设备。GUI、CLI 和 DSL 使用同一套交互能力。
+
 ### 运行时控制
 
 在设备运行时调整硬件状态，触发蓝牙断连、SIM 插拔、传感器异常等事件，观察应用和系统的响应。配合操作日志、配置比较、导出与恢复，重现问题发生时的环境。
 
-进一步提供虚拟机内存查看与修改、内部设备状态检查和调试接口，用于系统与虚拟硬件开发。
+### 虚拟环境、设备配置与场景包
 
-### 设备配置（Device Profile）与场景包
+`virtualenv/` 统一管理设备配置和动态环境，将位置、运动、光照、无线信号等变化放在同一条时间线上。例如模拟设备走出室内时，Wi-Fi 信号减弱、光照增强，并切换到蜂窝网络。
 
-Profile 将镜像、Root 启用选项、系统身份、硬件配置与初始状态保存为可复用的设备模板，用于快速创建相同环境。计划支持导入导出、继承和版本管理。
+设备配置（Device Profile）将镜像、Root 启用选项、系统身份、硬件配置与初始状态保存为可复用的设备模板，用于快速创建相同环境。计划支持导入导出、继承和版本管理。
 
 场景包将设备配置与配套脚本、媒体素材、位置轨迹、虚拟外设和运行参数一并组织，方便分享完整测试场景、批量运行和复现问题。
 
